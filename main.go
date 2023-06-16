@@ -1,45 +1,66 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"net/http"
 	"time"
 
-	"github.com/gin-contrib/cors"
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/adaptor/v2"
+	"github.com/gofiber/fiber/v2"
 )
 
+type Client struct {
+	name   string
+	events chan *DashBoard
+}
+type DashBoard struct {
+	User uint
+}
+
 func main() {
-	server := gin.Default()
-	server.Use(cors.Default())
-	server.GET("/progress", func(ctx *gin.Context) {
-		ctx.Writer.Header().Set("Content-Type", "text/event-stream")
-		ctx.Writer.Header().Set("Cache-Control", "no-cache")
-		ctx.Writer.Header().Set("Connection", "keep-alive")
-		// ctx.Writer.Header().Set("Transfer-Encoding", "chunked")
-		ctx.Writer.Flush()
+	app := fiber.New()
+	app.Get("/sse", adaptor.HTTPHandler(handler(dashboardHandler)))
+	app.Listen(":9000")
+}
 
-		for i := 0; i < 1000; i++ {
-			ctx.Writer.Write([]byte(fmt.Sprintf("id: %d\n", i)))
-			ctx.Writer.Write([]byte("event: onProgress\n"))
-			data, _ := json.Marshal(gin.H{
-				"progressPercentage": i + 1,
-			})
-			ctx.Writer.Write([]byte(fmt.Sprintf("data: %s\n", data)))
-			ctx.Writer.Write([]byte("\n"))
-			ctx.Writer.Flush()
-			time.Sleep(time.Second / 10)
+func handler(f http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(f)
+}
+func dashboardHandler(w http.ResponseWriter, r *http.Request) {
+	client := &Client{name: r.RemoteAddr, events: make(chan *DashBoard, 10)}
+	go updateDashboard(client)
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	timeout := time.After(1 * time.Second)
+	select {
+	case ev := <-client.events:
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.Encode(ev)
+		fmt.Fprintf(w, "data: %v\n\n", buf.String())
+		fmt.Printf("data: %v\n", buf.String())
+	case <-timeout:
+		fmt.Fprintf(w, ": nothing to sent\n\n")
+	}
+
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func updateDashboard(client *Client) {
+	for {
+		db := &DashBoard{
+			User: uint(rand.Uint32()),
 		}
-
-		ctx.Writer.Write([]byte("id: 100\n"))
-		ctx.Writer.Write([]byte("event: done\n"))
-		ctx.Writer.Write([]byte("data: {}\n"))
-		ctx.Writer.Write([]byte("\n"))
-
-		ctx.Writer.Flush()
-	})
-
-	if err := server.Run("0.0.0.0:8088"); err != nil {
-		panic(err)
+		client.events <- db
 	}
 }
