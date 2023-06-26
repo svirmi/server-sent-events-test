@@ -39,7 +39,7 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	timeout := time.After(1 * time.Second)
+	timeout := time.After(500 * time.Millisecond)
 	select {
 	case ev := <-client.events:
 		var buf bytes.Buffer
